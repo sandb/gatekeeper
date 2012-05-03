@@ -1,0 +1,11 @@
+#!/usr/bin/python
+
+import serial   #serial communication
+
+#setup serial ports of gatecontroller and huawei
+gatecontroller_port = "/dev/serial/by-id/usb-Texas_Instruments_Texas_Instruments_MSP-FET430UIF_07FF41CE96165627-if00"
+
+print("Opening 0x20 gate")
+serial = serial.Serial(gatecontroller_port, 2400)
+serial.write('u')
+serial.close()
