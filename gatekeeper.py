@@ -9,6 +9,7 @@ import time     #for the sleep function
 import select  #for select.error
 from errno import EINTR #read interrupt
 import traceback #for stacktrace
+import time
 
 #setup logging
 LOG_FILENAME = '/opt/gatekeeper/gatekeeper.log'
@@ -41,17 +42,36 @@ class GateController:
     self.serial.close()
     log.debug("LaunchPad GateKeeper connection closed")
 
+class TimeDomain:
+
+  def __init__(self,day,starthour,startmin,endhour,endmin):
+    self.day = day
+    self.start = (starthour * 60) + startmin
+    self.end = (endhour * 60) + endmin
+
+  def matches(self,tme):
+    if self.day != tme.tm_wday:
+      return False
+    minutes = (tme.tm_hour * 60) + tme.tm_min
+    if minutes < self.start:
+      return False
+    if minutes > self.end:
+      return False
+    return True
+
 class GateKeeper:
 
   def __init__(self):
-    self.public = False
+    self.isPublic = False
+    self.publicTimeDomains = []
     self.read_whitelist()
     self.enable_caller_id()
     self.data_channel = serial.Serial(huawei_port, 115200)
     self.gateController = GateController(gatecontroller_port)
 
   def read_whitelist(self):
-    self.public = False
+    self.isPublic = False
+    self.publicTimeDomains = []
     self.whitelist = {}
     file = open(whitelist_file,'r')
     entry_pattern = re.compile('([0-9][0-9]+?) (.*)')
@@ -63,14 +83,31 @@ class GateKeeper:
         name = entry_match.group(2)
         self.whitelist[number] = name
       elif line.strip() == '*':
-        self.public = True     
+        self.isPublic = True     
+      elif line.startswith("*"):
+        try:
+          star,dayofweek,starttime,endtime = line.split()
+          starthour, startmin = starttime.split(":")
+          endhour, endmin = endtime.split(":")
+          self.publicTimeDomains.append(TimeDomain(int(dayofweek),int(starthour),int(startmin),int(endhour),int(endmin))) 
+        except:
+          log.warn("Unable to read whitelist line \"" + line.rstrip() + "\" correctly, skipping")
       line = file.readline()
-    if self.public:
+    if self.public():
       log.info("Gatekeeper is in PUBLIC mode")
     else:
       log.info("Gatekeeper is in PRIVATE mode")
     file.close()
     log.debug("Whitelist " + str(self.whitelist))
+
+  def public(self):
+    if self.isPublic:
+      return True
+    tme = time.localtime()
+    for td in self.publicTimeDomains:
+      if td.matches(tme):
+        return True
+    return False
 
   def enable_caller_id(self):
     command_channel = serial.Serial(huawei_port, 115200)
@@ -120,7 +157,7 @@ class GateKeeper:
         self.handle_call(number)
   
   def handle_call(self,number):
-    if number in self.whitelist or self.public:
+    if number in self.whitelist or self.public():
       self.gateController.openGate()
       if number in self.whitelist:
         log.info("Opened the gate for " + self.whitelist[number] + " (" + number + ").")
